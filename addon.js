@@ -21,7 +21,7 @@ async function getImdbRating(imdbId, type) {
 }
 
 // Helper function to enrich and map TMDB items to Stremio Meta objects
-async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = false, skipRegionCheck = false) {
+async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = false, skipRegionCheck = false, seriesAvailabilityRegion = null) {
     const metaObjects = await Promise.all(results.map(async (item) => {
         let imdbId = null;
         let runtime = null;
@@ -114,6 +114,27 @@ async function enrichAndMapItems(results, stremioType, tmdbType, allowFuture = f
                 
                 if (!hasValidRelease) {
                     // If no valid IT release found, return null to filter this item out
+                    return null;
+                }
+            }
+
+            // STRICT REGION AVAILABILITY FILTER (Only for TV series when requested)
+            if (tmdbType === "tv" && seriesAvailabilityRegion) {
+                const providersCacheKey = `tmdb:watchproviders:tv:${item.id}`;
+                let providersData = await cache.get(providersCacheKey);
+                if (!providersData) {
+                    const providersUrl = `${BASE_URL}/tv/${item.id}/watch/providers?api_key=${TMDB_API_KEY}`;
+                    const providersRes = await fetch(providersUrl);
+                    providersData = await providersRes.json();
+                    if (providersData && !providersData.status_message) {
+                        await cache.set(providersCacheKey, providersData, 86400 * 3); // 3 days
+                    }
+                }
+
+                const hasRegionAvailability = providersData &&
+                    providersData.results &&
+                    providersData.results[seriesAvailabilityRegion];
+                if (!hasRegionAvailability) {
                     return null;
                 }
             }
@@ -1013,7 +1034,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 }
 
                 const results = Array.from(searchResults.values());
-                const metas = await enrichAndMapItems(results, type, tmdbType, false, true);
+                const seriesAvailabilityRegionForSearch = (tmdbType === "tv" && !id.includes("anime")) ? "IT" : null;
+                const metas = await enrichAndMapItems(results, type, tmdbType, false, true, seriesAvailabilityRegionForSearch);
                 return { metas };
 
             } catch (e) {
@@ -1298,7 +1320,16 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 
                 if (filteredResults.length > 0) {
                     const skipRegionCheck = (id === "tmdb.movie.anime" || id === "tmdb.series.anime");
-                    const newMetas = await enrichAndMapItems(filteredResults, type, tmdbType, allowFuture, skipRegionCheck);
+                    let seriesAvailabilityRegion = null;
+                    if (tmdbType === "tv" && !id.includes("anime")) {
+                        // Default strict region for all series catalogs
+                        seriesAvailabilityRegion = "IT";
+                        // Provider exception
+                        if (providerFromId === "HBO Max") {
+                            seriesAvailabilityRegion = "US";
+                        }
+                    }
+                    const newMetas = await enrichAndMapItems(filteredResults, type, tmdbType, allowFuture, skipRegionCheck, seriesAvailabilityRegion);
                     metas = metas.concat(newMetas);
                 }
                  
