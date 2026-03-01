@@ -1086,25 +1086,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 }
 
                 const results = Array.from(searchResults.values());
-                const isStandardSeriesSearch = (tmdbType === "tv" && !id.includes("anime"));
-                const seriesAvailabilityRegionForSearch = isStandardSeriesSearch ? "IT" : null;
-
-                let metas = await enrichAndMapItems(results, type, tmdbType, false, true, seriesAvailabilityRegionForSearch);
-
-                // For standard series search, keep IT-available items first,
-                // then append missing items from plain TMDB search.
-                if (isStandardSeriesSearch && results.length > 0 && metas.length < results.length) {
-                    const metasWithoutAvailabilityFilter = await enrichAndMapItems(results, type, tmdbType, false, true, null);
-                    const seenMetaIds = new Set(metas.map(m => m.id));
-
-                    metasWithoutAvailabilityFilter.forEach(meta => {
-                        if (!seenMetaIds.has(meta.id)) {
-                            seenMetaIds.add(meta.id);
-                            metas.push(meta);
-                        }
-                    });
-                }
-
+                const metas = await enrichAndMapItems(results, type, tmdbType, false, true, null);
+                console.log(`[TMDB Addon] Search debug: query="${query}" type=${type} catalog=${id} results=${results.length} metas=${metas.length}`);
                 return { metas };
 
             } catch (e) {
