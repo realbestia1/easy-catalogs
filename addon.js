@@ -21,6 +21,10 @@ const NEGATIVE_CACHE_MARKER = "__negative_cache__";
 const TOP10_GLOBAL_CATALOG_ID = "top10_italia";
 const TOP10_MOVIE_CONFIG_ID = "top10_italia_movie";
 const TOP10_SERIES_CONFIG_ID = "top10_italia_series";
+const HOME_TMDB_MAX_PAGES = Number.parseInt(process.env.TMDB_HOME_MAX_PAGES || "20", 10);
+const HOME_TMDB_PAGE_CAP = Number.isFinite(HOME_TMDB_MAX_PAGES) && HOME_TMDB_MAX_PAGES > 0
+    ? HOME_TMDB_MAX_PAGES
+    : null;
 
 function withTtlJitter(baseTtlSeconds, jitterPercent = CACHE_TTL_JITTER_PERCENT) {
     const delta = Math.floor(baseTtlSeconds * jitterPercent);
@@ -1005,6 +1009,18 @@ function getPrimaryReleaseDate(item) {
     return (item && (item.release_date || item.first_air_date)) || "";
 }
 
+function isHomeCatalogRequest(extra = {}) {
+    if (!extra || typeof extra !== "object") return true;
+
+    const keys = Object.keys(extra).filter(key => {
+        const value = extra[key];
+        if (value === undefined || value === null) return false;
+        return String(value).trim().length > 0;
+    });
+
+    return keys.every(key => key === "skip");
+}
+
 function filterCatalogItems(results, catalogId, allowFuture = false) {
     const today = new Date().toISOString().split("T")[0];
     return (Array.isArray(results) ? results : []).filter(item => {
@@ -1177,7 +1193,8 @@ async function fetchProviderOriginalMergedResults({
     extra = {},
     config = null,
     allowFuture = false,
-    skip = 0
+    skip = 0,
+    maxPages = null
 }) {
     const canonicalProviderName = normalizeProviderName(providerName);
     const providerId = PROVIDERS[canonicalProviderName];
@@ -1211,6 +1228,7 @@ async function fetchProviderOriginalMergedResults({
 
         const originalItems = await fetchTmdbPagedResults(endpoint, originalQueryParams, {
             minItems: targetCount,
+            maxPages,
             itemFilter: async rawResults => filterCatalogItems(rawResults, id, allowFuture)
         });
         const originalIds = new Set(originalItems.map(item => String(item.id)));
@@ -1218,6 +1236,7 @@ async function fetchProviderOriginalMergedResults({
         const exclusiveQueryParams = `${baseQueryParams}${sharedProviderParams}`;
         const exclusiveItems = await fetchTmdbPagedResults(endpoint, exclusiveQueryParams, {
             minItems: targetCount,
+            maxPages,
             itemFilter: async rawResults => {
                 const filteredItems = filterCatalogItems(rawResults, id, allowFuture);
                 const exclusiveCandidates = await Promise.all(filteredItems.map(async item => {
@@ -4603,6 +4622,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
     const allowFuture = id.includes("upcoming");
     const config = getRequestConfig();
     const resolvedExtra = extra || {};
+    const isHomeRequest = isHomeCatalogRequest(resolvedExtra);
+    const homePageCap = isHomeRequest ? HOME_TMDB_PAGE_CAP : null;
     const catalogShapes = getConfiguredCatalogShapes(config);
     const landscapeForCatalog = shouldLandscapeCatalog(id, catalogShapes);
     
@@ -4961,7 +4982,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                     extra: resolvedExtra,
                     config,
                     allowFuture,
-                    skip: providerOffset
+                    skip: providerOffset,
+                    maxPages: homePageCap
                 });
 
                 if (!mergedResults || mergedResults.items.length === 0) {
@@ -5010,7 +5032,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
             allowFuture,
             providerRegion,
             startPage: fetchedPage,
-            pageOffset
+            pageOffset,
+            maxPages: homePageCap
         });
 
         if (metas.length === 0 && providerFromId) {
@@ -5026,7 +5049,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                     allowFuture,
                     providerRegion: fallbackRegion,
                     startPage: fetchedPage,
-                    pageOffset
+                    pageOffset,
+                    maxPages: homePageCap
                 });
 
                 if (metas.length > 0) {
