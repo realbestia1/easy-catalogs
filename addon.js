@@ -126,6 +126,10 @@ function normalizeConfiguredCatalogEntryKey(key) {
         [TOP10_SERIES_CONFIG_ID]: TOP10_GLOBAL_CATALOG_ID,
         [LEGACY_TOP10_MOVIE_CONFIG_ID]: TOP10_GLOBAL_CATALOG_ID,
         [LEGACY_TOP10_SERIES_CONFIG_ID]: TOP10_GLOBAL_CATALOG_ID,
+        rakuten: "",
+        rakuten_catalog: "",
+        rakuten_original: "",
+        rakuten_top10: "",
         anime_movie: "anime_tmdb_movie",
         anime_series: "anime_tmdb_series",
         anime_search_movie: "anime_tmdb_search_movie",
@@ -831,7 +835,6 @@ const TOP10_PROVIDER_PAGE_SLUGS = {
     mediaset: "mediaset-infinity",
     timvision: "timvision",
     rai: "rai-play",
-    rakuten: "rakuten-tv",
     crunchyroll: "crunchyroll",
     discoverypluseu: "discovery-plus-eu"
 };
@@ -3868,7 +3871,6 @@ const PROVIDERS = {
     "Rai Play": 222,
     "Mediaset Infinity": "359|110",
     "Timvision": 109,
-    "Rakuten TV": 35,
     "Crunchyroll": 283
 };
 
@@ -3880,7 +3882,7 @@ const COMPANY_IDS = {
     "HBO Max": "7429|174|128064|12|158691", // HBO Films, WB, DC Films, New Line, HBO Max
     "Paramount+": 4,
     "Rai Play": 1583, "Mediaset Infinity": 1677, "Sky Go / NOW": 19079,
-    "Timvision": 109, "Rakuten TV": 35
+    "Timvision": 109
 };
 
 const NETWORK_IDS = {
@@ -3902,7 +3904,7 @@ const SLUG_TO_PROVIDER = {
     "disney": "Disney+", "apple": "Apple TV+", "hbo": "HBO Max",
     "paramount": "Paramount+", "now": "Sky Go / NOW", "sky": "Sky Go / NOW",
     "rai": "Rai Play", "mediaset": "Mediaset Infinity",
-    "timvision": "Timvision", "rakuten": "Rakuten TV",
+    "timvision": "Timvision",
     "crunchyroll": "Crunchyroll",
     "discoverypluseu": "Discovery+"
 };

@@ -70,7 +70,6 @@ const PROVIDERS = {
   "Rai Play": 222,
   "Mediaset Infinity": 359,
   "Timvision": 109,
-  "Rakuten TV": 35,
   "Infinity+": 110,
   "HBO Max": 1899
 };
