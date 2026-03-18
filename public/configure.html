@@ -1786,14 +1786,6 @@
                                 </div>
                             </div>
                             <div class="input-group" style="margin-top: 1rem;">
-                                <label for="topStreamingKey">Top Poster API Key</label>
-                                <input type="text" id="topStreamingKey" placeholder="Incolla la tua chiave qui...">
-                                <div class="input-hint">
-                                    Necessaria per poster personalizzati.
-                                    <a href="https://api.top-streaming.stream" target="_blank">Richiedi su api.top-streaming.stream</a>
-                                </div>
-                            </div>
-                            <div class="input-group" style="margin-top: 1rem;">
                                 <label for="erdbConfig">ERDB Config (base64url)</label>
                                 <input type="text" id="erdbConfig" placeholder="Incolla la stringa base64url di ERDB">
                                 <div class="input-hint">
@@ -2970,10 +2962,6 @@
 
             document.getElementById("useTvdbSeriesMeta").checked = resolvedConfig.useTvdbSeriesMeta === true || resolvedConfig.seriesMetaProvider === "tvdb";
 
-            if (typeof resolvedConfig.topStreamingKey === "string") {
-                document.getElementById("topStreamingKey").value = resolvedConfig.topStreamingKey;
-            }
-
             applyErdbConfigFields(resolvedConfig);
 
             if (typeof resolvedConfig.catalogs !== "string" || !resolvedConfig.catalogs.trim()) return;
@@ -3436,14 +3424,12 @@
             const tvdbApiKey = document.getElementById("tvdbApiKey").value.trim();
             const tvdbPin = document.getElementById("tvdbPin").value.trim();
             const useTvdbSeriesMeta = document.getElementById("useTvdbSeriesMeta").checked;
-            const topPosterKey = document.getElementById("topStreamingKey").value.trim();
             const returnStreams = document.getElementById("returnStreams").checked;
 
             if (tmdbApiKey) config.tmdbApiKey = tmdbApiKey;
             if (tvdbApiKey) config.tvdbApiKey = tvdbApiKey;
             if (tvdbPin) config.tvdbPin = tvdbPin;
             if (useTvdbSeriesMeta) config.seriesMetaProvider = "tvdb";
-            if (topPosterKey) config.topStreamingKey = topPosterKey;
             if (!returnStreams) config.returnStreams = false;
 
             const erdbConfigValue = document.getElementById("erdbConfig").value.trim();

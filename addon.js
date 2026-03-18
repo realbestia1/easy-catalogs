@@ -369,6 +369,32 @@ function decodeErdbConfig(value) {
     }
 }
 
+function normalizeErdbQueryParam(value, options = {}) {
+    const preserveEmpty = options && options.preserveEmpty === true;
+    if (value === undefined || value === null) return undefined;
+
+    if (Array.isArray(value)) {
+        const joined = value
+            .map(entry => String(entry ?? "").trim())
+            .filter(Boolean)
+            .join(",");
+        if (joined) return joined;
+        return preserveEmpty ? "" : undefined;
+    }
+
+    const normalized = String(value).trim();
+    if (!normalized && !preserveEmpty) return undefined;
+    return normalized;
+}
+
+function getErdbPreferredValue(...values) {
+    for (const value of values) {
+        const normalized = normalizeErdbQueryParam(value);
+        if (normalized !== undefined) return normalized;
+    }
+    return undefined;
+}
+
 function normalizeErdbId(value) {
     const rawValue = String(value || "").trim();
     if (!rawValue) return null;
@@ -434,41 +460,16 @@ function resolveErdbMediaId(imdbId, tmdbId, mediaIdOverride = null, mediaType = 
 function getErdbConfig(config = null) {
     const resolvedConfig = getRequestConfig(config);
     const encodedConfig = resolvedConfig && typeof resolvedConfig.erdbConfig === "string"
-        ? resolvedConfig.erdbConfig
+        ? resolvedConfig.erdbConfig.trim()
         : "";
     const rawConfig = decodeErdbConfig(encodedConfig);
-    if (!rawConfig || typeof rawConfig !== "object") return null;
+    if (!rawConfig || typeof rawConfig !== "object" || Array.isArray(rawConfig)) return null;
 
     const baseUrl = normalizeErdbBaseUrl(rawConfig.baseUrl);
-    const tmdbKey = typeof rawConfig.tmdbKey === "string" ? rawConfig.tmdbKey.trim() : "";
-    const mdblistKey = typeof rawConfig.mdblistKey === "string" ? rawConfig.mdblistKey.trim() : "";
+    const tmdbKey = normalizeErdbQueryParam(rawConfig.tmdbKey);
+    const mdblistKey = normalizeErdbQueryParam(rawConfig.mdblistKey);
 
     if (!baseUrl || !tmdbKey || !mdblistKey) return null;
-
-    const ratingsInfo = parseErdbRatings(rawConfig.ratings);
-    const posterRatingsInfo = parseErdbRatings(rawConfig.posterRatings);
-    const backdropRatingsInfo = parseErdbRatings(rawConfig.backdropRatings);
-    const logoRatingsInfo = parseErdbRatings(rawConfig.logoRatings);
-    const lang = normalizeErdbLang(rawConfig.lang);
-    const posterRatingStyle = normalizeErdbStyle(rawConfig.posterRatingStyle);
-    const backdropRatingStyle = normalizeErdbStyle(rawConfig.backdropRatingStyle);
-    const logoRatingStyle = normalizeErdbStyle(rawConfig.logoRatingStyle);
-    const posterImageText = normalizeErdbImageText(rawConfig.posterImageText);
-    const backdropImageText = normalizeErdbImageText(rawConfig.backdropImageText);
-    const posterRatingsLayout = normalizeErdbPosterLayout(rawConfig.posterRatingsLayout);
-    const backdropRatingsLayout = normalizeErdbBackdropLayout(rawConfig.backdropRatingsLayout);
-    const streamBadges = normalizeErdbStreamBadges(rawConfig.streamBadges);
-    const posterStreamBadges = normalizeErdbStreamBadges(rawConfig.posterStreamBadges);
-    const backdropStreamBadges = normalizeErdbStreamBadges(rawConfig.backdropStreamBadges);
-    const qualityBadgesSide = normalizeErdbQualityBadgesSide(rawConfig.qualityBadgesSide);
-    const qualityBadgesStyle = normalizeErdbStyle(rawConfig.qualityBadgesStyle);
-    const posterQualityBadgesStyle = normalizeErdbStyle(rawConfig.posterQualityBadgesStyle);
-    const backdropQualityBadgesStyle = normalizeErdbStyle(rawConfig.backdropQualityBadgesStyle);
-    const maxPerSideRaw = rawConfig.posterRatingsMaxPerSide;
-    const maxPerSideParsed = parseInt(maxPerSideRaw, 10);
-    const posterRatingsMaxPerSide = Number.isFinite(maxPerSideParsed) && maxPerSideParsed >= 1 && maxPerSideParsed <= 20
-        ? maxPerSideParsed
-        : null;
 
     const enabledTypesRaw = resolvedConfig && typeof resolvedConfig.erdbTypes === "object"
         ? resolvedConfig.erdbTypes
@@ -483,30 +484,7 @@ function getErdbConfig(config = null) {
         baseUrl,
         tmdbKey,
         mdblistKey,
-        ratings: ratingsInfo.values,
-        ratingsExplicitEmpty: ratingsInfo.explicitEmpty,
-        posterRatings: posterRatingsInfo.values,
-        posterRatingsExplicitEmpty: posterRatingsInfo.explicitEmpty,
-        backdropRatings: backdropRatingsInfo.values,
-        backdropRatingsExplicitEmpty: backdropRatingsInfo.explicitEmpty,
-        logoRatings: logoRatingsInfo.values,
-        logoRatingsExplicitEmpty: logoRatingsInfo.explicitEmpty,
-        lang,
-        posterRatingStyle,
-        backdropRatingStyle,
-        logoRatingStyle,
-        posterImageText,
-        backdropImageText,
-        posterRatingsLayout,
-        posterRatingsMaxPerSide,
-        backdropRatingsLayout,
-        streamBadges,
-        posterStreamBadges,
-        backdropStreamBadges,
-        qualityBadgesSide,
-        qualityBadgesStyle,
-        posterQualityBadgesStyle,
-        backdropQualityBadgesStyle,
+        rawConfig,
         enabledTypes
     };
 }
@@ -514,70 +492,54 @@ function getErdbConfig(config = null) {
 function buildErdbUrl(config, assetType, erdbId) {
     if (!config || !erdbId) return null;
 
+    const rawConfig = config.rawConfig && typeof config.rawConfig === "object"
+        ? config.rawConfig
+        : {};
     const query = new URLSearchParams();
-    query.set("tmdbKey", config.tmdbKey);
-    query.set("mdblistKey", config.mdblistKey);
-    if (Array.isArray(config.ratings) && config.ratings.length > 0) {
-        query.set("ratings", config.ratings.join(","));
-    } else if (config.ratingsExplicitEmpty) {
-        query.set("ratings", "");
-    }
-    if (config.lang) query.set("lang", config.lang);
-    if (config.streamBadges) query.set("streamBadges", config.streamBadges);
-    if (config.qualityBadgesStyle) query.set("qualityBadgesStyle", config.qualityBadgesStyle);
-    const ratingStyle = assetType === "poster"
-        ? config.posterRatingStyle
-        : assetType === "backdrop"
-            ? config.backdropRatingStyle
-            : config.logoRatingStyle;
-    if (ratingStyle) query.set("ratingStyle", ratingStyle);
+    const setQueryParam = (key, value, options = {}) => {
+        const normalized = normalizeErdbQueryParam(value, options);
+        if (normalized === undefined) return;
+        query.set(key, normalized);
+    };
+    const ratingStyle = getErdbPreferredValue(
+        assetType === "poster"
+            ? rawConfig.posterRatingStyle
+            : assetType === "backdrop"
+                ? rawConfig.backdropRatingStyle
+                : rawConfig.logoRatingStyle,
+        rawConfig.ratingStyle
+    );
+    const imageText = assetType === "logo"
+        ? undefined
+        : getErdbPreferredValue(
+            assetType === "backdrop"
+                ? rawConfig.backdropImageText
+                : rawConfig.posterImageText,
+            rawConfig.imageText
+        );
 
-    if (assetType === "poster") {
-        if (Array.isArray(config.posterRatings) && config.posterRatings.length > 0) {
-            query.set("posterRatings", config.posterRatings.join(","));
-        } else if (config.posterRatingsExplicitEmpty) {
-            query.set("posterRatings", "");
-        }
-        if (config.posterStreamBadges) query.set("posterStreamBadges", config.posterStreamBadges);
-        if (config.qualityBadgesSide) query.set("qualityBadgesSide", config.qualityBadgesSide);
-        if (config.posterQualityBadgesStyle) {
-            query.set("posterQualityBadgesStyle", config.posterQualityBadgesStyle);
-        }
-    } else if (assetType === "backdrop") {
-        if (Array.isArray(config.backdropRatings) && config.backdropRatings.length > 0) {
-            query.set("backdropRatings", config.backdropRatings.join(","));
-        } else if (config.backdropRatingsExplicitEmpty) {
-            query.set("backdropRatings", "");
-        }
-        if (config.backdropStreamBadges) query.set("backdropStreamBadges", config.backdropStreamBadges);
-        if (config.backdropQualityBadgesStyle) {
-            query.set("backdropQualityBadgesStyle", config.backdropQualityBadgesStyle);
-        }
-    } else if (assetType === "logo") {
-        if (Array.isArray(config.logoRatings) && config.logoRatings.length > 0) {
-            query.set("logoRatings", config.logoRatings.join(","));
-        } else if (config.logoRatingsExplicitEmpty) {
-            query.set("logoRatings", "");
-        }
-    }
-
+    setQueryParam("tmdbKey", config.tmdbKey);
+    setQueryParam("mdblistKey", config.mdblistKey);
+    setQueryParam("ratings", rawConfig.ratings, { preserveEmpty: true });
+    setQueryParam("posterRatings", rawConfig.posterRatings, { preserveEmpty: true });
+    setQueryParam("backdropRatings", rawConfig.backdropRatings, { preserveEmpty: true });
+    setQueryParam("logoRatings", rawConfig.logoRatings, { preserveEmpty: true });
+    setQueryParam("lang", rawConfig.lang);
+    setQueryParam("streamBadges", rawConfig.streamBadges);
+    setQueryParam("posterStreamBadges", rawConfig.posterStreamBadges);
+    setQueryParam("backdropStreamBadges", rawConfig.backdropStreamBadges);
+    setQueryParam("qualityBadgesSide", rawConfig.qualityBadgesSide);
+    setQueryParam("posterQualityBadgesPosition", rawConfig.posterQualityBadgesPosition);
+    setQueryParam("qualityBadgesStyle", rawConfig.qualityBadgesStyle);
+    setQueryParam("posterQualityBadgesStyle", rawConfig.posterQualityBadgesStyle);
+    setQueryParam("backdropQualityBadgesStyle", rawConfig.backdropQualityBadgesStyle);
+    setQueryParam("ratingStyle", ratingStyle);
     if (assetType !== "logo") {
-        const imageText = assetType === "backdrop" ? config.backdropImageText : config.posterImageText;
-        if (imageText) query.set("imageText", imageText);
+        setQueryParam("imageText", imageText);
     }
-
-    if (assetType === "poster") {
-        if (config.posterRatingsLayout) {
-            query.set("posterRatingsLayout", config.posterRatingsLayout);
-        }
-        if (config.posterRatingsMaxPerSide) {
-            query.set("posterRatingsMaxPerSide", String(config.posterRatingsMaxPerSide));
-        }
-    }
-
-    if (assetType === "backdrop" && config.backdropRatingsLayout) {
-        query.set("backdropRatingsLayout", config.backdropRatingsLayout);
-    }
+    setQueryParam("posterRatingsLayout", rawConfig.posterRatingsLayout);
+    setQueryParam("posterRatingsMaxPerSide", rawConfig.posterRatingsMaxPerSide);
+    setQueryParam("backdropRatingsLayout", rawConfig.backdropRatingsLayout);
 
     const baseUrl = config.baseUrl.replace(/\/+$/g, "");
     const encodedId = encodeURIComponent(erdbId);
@@ -594,20 +556,6 @@ function getConfiguredAssetUrl(config, assetType, imdbId, tmdbId, mediaIdOverrid
         const erdbId = resolveErdbMediaId(imdbId, tmdbId, mediaIdOverride, mediaType);
         if (!erdbId) return null;
         return buildErdbUrl(erdbConfig, assetType, erdbId);
-    }
-
-    if (assetType !== "poster") return null;
-
-    const topStreamingKey = typeof resolvedConfig.topStreamingKey === "string"
-        ? resolvedConfig.topStreamingKey.trim()
-        : "";
-    if (topStreamingKey) {
-        if (imdbId) {
-            const imdbForTopStreaming = normalizeImdbId(imdbId);
-            return `https://api.top-streaming.stream/${topStreamingKey}/imdb/poster-default/${imdbForTopStreaming}.jpg`;
-        }
-        if (!tmdbId) return null;
-        return `https://api.top-streaming.stream/${topStreamingKey}/tmdb/poster-default/${tmdbId}.jpg`;
     }
 
     return null;
@@ -2786,6 +2734,7 @@ function buildFallbackTop10CatalogMeta(entry, requestedType, tmdbId, config = nu
     const metaId = `tmdb:${tmdbId}`;
     const configuredPosterUrl = getConfiguredAssetUrl(resolvedConfig, "poster", null, tmdbId, metaId, requestedType);
     const configuredBackdropUrl = getConfiguredAssetUrl(resolvedConfig, "backdrop", null, tmdbId, metaId, requestedType);
+    const configuredLogoUrl = getConfiguredAssetUrl(resolvedConfig, "logo", null, tmdbId, metaId, requestedType);
 
     return {
         id: metaId,
@@ -2793,6 +2742,7 @@ function buildFallbackTop10CatalogMeta(entry, requestedType, tmdbId, config = nu
         name: entry.title,
         poster: configuredPosterUrl || entry.poster || undefined,
         background: configuredBackdropUrl || entry.background || undefined,
+        logo: configuredLogoUrl || undefined,
         description: entry.rank ? `Top 10 Italia #${entry.rank}` : undefined,
         releaseInfo: entry.year ? String(entry.year) : undefined,
         year: entry.year || undefined,
@@ -2830,7 +2780,7 @@ async function fetchTop10CatalogMetas(catalogId, requestedType, extra = {}, conf
     const configHash = config && typeof config === "object" && Object.keys(config).length > 0
         ? JSON.stringify(config)
         : "default";
-    const cacheKey = `top10:catalog:v3:${normalizedCatalogId}:${requestedType}:${configHash}`;
+    const cacheKey = `top10:catalog:v4:${normalizedCatalogId}:${requestedType}:${configHash}`;
     const cached = await cache.get(cacheKey);
     if (isNegativeCache(cached)) return [];
     if (cached) return cached;
@@ -4995,14 +4945,13 @@ async function fetchKitsuCatalogMetas(catalogId, requestedType, extra = {}, conf
     const erdbTypesKey = resolvedConfig.erdbTypes && typeof resolvedConfig.erdbTypes === "object"
         ? resolvedConfig.erdbTypes
         : {};
-    const cacheKey = `kitsu:catalog:v19:${normalizedCatalogId}:${JSON.stringify({
+    const cacheKey = `kitsu:catalog:v20:${normalizedCatalogId}:${JSON.stringify({
         skip,
         search,
         discover,
         allowedSubtypes: allowedSubtypes.join(","),
         excludeFutureStartDates,
         tmdbApiKey: resolvedConfig.tmdbApiKey || "",
-        topStreamingKey: resolvedConfig.topStreamingKey || "",
         erdbConfig: erdbConfigKey,
         erdbTypes: erdbTypesKey
     })}`;
@@ -5644,7 +5593,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
     
     const config = getRequestConfig();
     const configHash = Object.keys(config).length > 0 ? JSON.stringify(config) : "default";
-    const cacheKey = `meta_v15:${type}:${id}:${configHash}`;
+    const cacheKey = `meta_v16:${type}:${id}:${configHash}`;
     const metaTtl = type === "movie" ? CACHE_TTL_SECONDS.metaMovie : CACHE_TTL_SECONDS.metaSeries;
     
     const cached = await cache.get(cacheKey);
