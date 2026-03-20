@@ -3308,7 +3308,7 @@ function isPreferredItalianSagaEpisodeGroup(group) {
         return true;
     }
 
-    if (normalizedName.includes("italian") && normalizedName.includes("saga")) {
+    if (normalizedName.includes("italian")) {
         return true;
     }
 
@@ -3330,7 +3330,7 @@ async function resolvePreferredTmdbEpisodeGroupDetails(tmdbSeriesId, config = nu
     const episodeGroups = await fetchTmdbEpisodeGroups(cleanSeriesId, config);
     const preferredGroup = episodeGroups.find(group => {
         const normalizedName = normalizeMatchTitle(group && group.name);
-        return normalizedName === "italian sagas" || normalizedName === "italian saga" || normalizedName === "italian";
+        return normalizedName === "italian sagas" || normalizedName === "italian saga" || normalizedName === "italian" || normalizedName.includes("italian");
     }) || episodeGroups.find(isPreferredItalianSagaEpisodeGroup);
 
     if (!preferredGroup || !preferredGroup.id) {
