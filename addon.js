@@ -536,6 +536,10 @@ function resolveErdbMediaId(imdbId, tmdbId, mediaIdOverride = null, mediaType = 
             const [, idPart] = overrideId.split(":");
             return `tmdb:${normalizedType}:${idPart}`;
         }
+        if (normalizedType && /^tmdb:\d+:\d+:\d+$/i.test(overrideId)) {
+            const [, tmdbNumericId, seasonNumber, episodeNumber] = overrideId.split(":");
+            return `tmdb:${normalizedType}:${tmdbNumericId}:${seasonNumber}:${episodeNumber}`;
+        }
         return overrideId;
     }
 
@@ -602,6 +606,10 @@ function buildErdbUrl(config, assetType, erdbId) {
     const rawConfig = config.rawConfig && typeof config.rawConfig === "object"
         ? config.rawConfig
         : {};
+    const normalizedRatings = normalizeErdbProviderParam(rawConfig.ratings, { preserveEmpty: true });
+    const normalizedPosterRatings = normalizeErdbProviderParam(rawConfig.posterRatings, { preserveEmpty: true });
+    const normalizedBackdropRatings = normalizeErdbProviderParam(rawConfig.backdropRatings, { preserveEmpty: true });
+    const normalizedLogoRatings = normalizeErdbProviderParam(rawConfig.logoRatings, { preserveEmpty: true });
     const query = new URLSearchParams();
     const setQueryParam = (key, value, options = {}) => {
         const normalized = normalizeErdbQueryParam(value, options);
@@ -630,7 +638,7 @@ function buildErdbUrl(config, assetType, erdbId) {
         });
     const ratingsParam = assetType === "thumbnail"
         ? effectiveThumbnailRatings
-        : rawConfig.ratings;
+        : normalizedRatings;
     const thumbnailRatingsParam = assetType === "thumbnail"
         ? effectiveThumbnailRatings
         : (hasExplicitThumbnailRatings
@@ -644,10 +652,13 @@ function buildErdbUrl(config, assetType, erdbId) {
     setQueryParam("mdblistKey", config.mdblistKey);
     setQueryParam("simklClientId", config.simklClientId);
     setQueryParam("ratings", ratingsParam, { preserveEmpty: true });
-    setQueryParam("posterRatings", rawConfig.posterRatings, { preserveEmpty: true });
-    setQueryParam("backdropRatings", rawConfig.backdropRatings, { preserveEmpty: true });
+    setQueryParam("posterRatings", normalizedPosterRatings, { preserveEmpty: true });
+    setQueryParam("backdropRatings", normalizedBackdropRatings, { preserveEmpty: true });
     setQueryParam("thumbnailRatings", thumbnailRatingsParam, { preserveEmpty: true });
-    setQueryParam("logoRatings", rawConfig.logoRatings, { preserveEmpty: true });
+    setQueryParam("logoRatings", normalizedLogoRatings, { preserveEmpty: true });
+    if (assetType === "logo") {
+        setQueryParam("logoRatingsMax", rawConfig.logoRatingsMax);
+    }
     setQueryParam("lang", rawConfig.lang);
     setQueryParam("streamBadges", rawConfig.streamBadges);
     setQueryParam("posterStreamBadges", rawConfig.posterStreamBadges);
@@ -2740,7 +2751,7 @@ async function fetchTop10CatalogMetas(catalogId, requestedType, extra = {}, conf
     const configHash = config && typeof config === "object" && Object.keys(config).length > 0
         ? JSON.stringify(config)
         : "default";
-    const cacheKey = `top10:catalog:v6:${normalizedCatalogId}:${requestedType}:${configHash}`;
+    const cacheKey = `top10:catalog:v7:${normalizedCatalogId}:${requestedType}:${configHash}`;
     const cached = await cache.get(cacheKey);
     if (isNegativeCache(cached)) return [];
     if (cached) return cached;
@@ -3399,7 +3410,7 @@ async function buildTmdbSeriesVideosFromStandardSeasons(item, cinemetaMeta, conf
             const cinemetaThumb = cinemetaEpisodes[`${episode.season_number}:${episode.episode_number}`]?.thumbnail;
             const episodeNumber = shouldRenumber ? (index + 1) : episode.episode_number;
             const episodeMediaId = `${getPrimaryMediaId(imdbId, item.id)}:${episode.season_number}:${episodeNumber}`;
-            const configuredThumbnailUrl = getConfiguredAssetUrl(resolvedConfig, "thumbnail", imdbId, item.id, episodeMediaId);
+            const configuredThumbnailUrl = getConfiguredAssetUrl(resolvedConfig, "thumbnail", imdbId, item.id, episodeMediaId, "series");
             const fallbackThumbnail = episode.still_path
                 ? `https://image.tmdb.org/t/p/w500${episode.still_path}`
                 : (cinemetaThumb || fallbackBackdrop);
@@ -3482,7 +3493,7 @@ function buildTmdbSeriesVideosFromEpisodeGroup(item, episodeGroupDetails, cineme
                 : null;
             const episodeNumber = episodeIndex + 1;
             const episodeMediaId = `${getPrimaryMediaId(imdbId, item.id)}:${seasonNumber}:${episodeNumber}`;
-            const configuredThumbnailUrl = getConfiguredAssetUrl(resolvedConfig, "thumbnail", imdbId, item.id, episodeMediaId);
+            const configuredThumbnailUrl = getConfiguredAssetUrl(resolvedConfig, "thumbnail", imdbId, item.id, episodeMediaId, "series");
             const fallbackThumbnail = episode && episode.still_path
                 ? `https://image.tmdb.org/t/p/w500${episode.still_path}`
                 : (cinemetaThumb || fallbackBackdrop);
@@ -3997,9 +4008,9 @@ async function enrichKitsuEpisodeVideosWithAnimeMapping(kitsuId, videos, tmdbDet
             ? video.id
             : null;
         const configuredThumbnailUrl = configuredKitsuThumbnailId
-            ? getConfiguredAssetUrl(getRequestConfig(config), "thumbnail", imdbId, tmdbSeriesId, configuredKitsuThumbnailId)
+            ? getConfiguredAssetUrl(getRequestConfig(config), "thumbnail", imdbId, tmdbSeriesId, configuredKitsuThumbnailId, "series")
             : (episodeMediaId
-                ? getConfiguredAssetUrl(getRequestConfig(config), "thumbnail", imdbId, tmdbSeriesId, episodeMediaId)
+                ? getConfiguredAssetUrl(getRequestConfig(config), "thumbnail", imdbId, tmdbSeriesId, episodeMediaId, "series")
                 : null);
         const tmdbThumbnail = tmdbEpisode && tmdbEpisode.still_path
             ? `https://image.tmdb.org/t/p/w500${tmdbEpisode.still_path}`
@@ -4465,7 +4476,7 @@ async function fetchKitsuCatalogMetas(catalogId, requestedType, extra = {}, conf
     const erdbTypesKey = resolvedConfig.erdbTypes && typeof resolvedConfig.erdbTypes === "object"
         ? resolvedConfig.erdbTypes
         : {};
-    const cacheKey = `kitsu:catalog:v22:${normalizedCatalogId}:${JSON.stringify({
+    const cacheKey = `kitsu:catalog:v23:${normalizedCatalogId}:${JSON.stringify({
         skip,
         search,
         discover,
@@ -4712,7 +4723,7 @@ const PROVIDERS_SERIES_ONLY = new Set(["Discovery+"]);
 
 const manifest = {
     id: "org.bestia.easycatalogs",
-    version: "1.0.53",
+    version: "1.0.54",
     name: "Easy Catalogs",
     description: "Easy Catalogs per Stremio",
     behaviorHints: {
@@ -5113,7 +5124,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
 
     const config = getRequestConfig();
     const configHash = Object.keys(config).length > 0 ? JSON.stringify(config) : "default";
-    const cacheKey = `meta_v18:${type}:${id}:${configHash}`;
+    const cacheKey = `meta_v19:${type}:${id}:${configHash}`;
     const metaTtl = type === "movie" ? CACHE_TTL_SECONDS.metaMovie : CACHE_TTL_SECONDS.metaSeries;
 
     const cached = await cache.get(cacheKey);
@@ -6106,4 +6117,3 @@ try {
 app.listen(PORT, () => {
     console.log(`Addon active on http://localhost:${PORT}`);
 });
-
