@@ -378,20 +378,28 @@ function applyConfiguredCatalogShape(catalog, lookupKey, shapes) {
     return { ...catalog, posterShape: "landscape" };
 }
 
-function createDiscoverOnlyCatalog(catalog) {
+const DISCOVERY_ONLY_CATALOG_SUFFIX = ".discovery";
+
+function toDiscoveryCatalogId(catalogId) {
+    const normalizedCatalogId = String(catalogId || "").trim();
+    if (!normalizedCatalogId) return "";
+    if (normalizedCatalogId.endsWith(DISCOVERY_ONLY_CATALOG_SUFFIX)) return normalizedCatalogId;
+    return `${normalizedCatalogId}${DISCOVERY_ONLY_CATALOG_SUFFIX}`;
+}
+
+function fromDiscoveryCatalogId(catalogId) {
+    const normalizedCatalogId = String(catalogId || "").trim();
+    if (!normalizedCatalogId.endsWith(DISCOVERY_ONLY_CATALOG_SUFFIX)) return normalizedCatalogId;
+    return normalizedCatalogId.slice(0, -DISCOVERY_ONLY_CATALOG_SUFFIX.length);
+}
+
+function isDiscoveryCatalogId(catalogId) {
+    return String(catalogId || "").trim().endsWith(DISCOVERY_ONLY_CATALOG_SUFFIX);
+}
+
+function createDiscoveryOnlyCatalog(catalog) {
     if (!catalog) return catalog;
-
-    const extra = Array.isArray(catalog.extra) ? [...catalog.extra] : [];
-    const hasMeaningfulExtra = extra.some(entry => {
-        const name = entry && typeof entry.name === "string" ? entry.name.trim().toLowerCase() : "";
-        return name && name !== "skip" && name !== "discover";
-    });
-    const hasDiscoverExtra = extra.some(entry => entry && entry.name === "discover");
-    if (!hasMeaningfulExtra && !hasDiscoverExtra) {
-        extra.push({ name: "discover", isRequired: true, options: ["only", "Only"] });
-    }
-
-    return { ...catalog, extra };
+    return { ...catalog, id: toDiscoveryCatalogId(catalog.id) };
 }
 
 function getTextBackdropFromDetails(details, preferredLangs = ["it", "en"]) {
@@ -1367,13 +1375,7 @@ function isHomeCatalogRequest(extra = {}) {
 
 function isDiscoverCatalogRequest(extra = {}) {
     if (!extra || typeof extra !== "object") return false;
-    if (!Object.prototype.hasOwnProperty.call(extra, "discover")) return false;
-
-    const discoverValue = extra.discover;
-    if (discoverValue === undefined || discoverValue === null) return true;
-    if (typeof discoverValue === "boolean") return discoverValue;
-
-    return String(discoverValue).trim().length >= 0;
+    return Object.prototype.hasOwnProperty.call(extra, "discover");
 }
 
 function filterCatalogItems(results, catalogId, allowFuture = false) {
@@ -5579,29 +5581,35 @@ async function transformToMeta(item, type, config = null, options = {}) {
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
     console.log(`[Easy Catalogs] Request: type=${type} id=${id} extra=${JSON.stringify(extra)}`);
 
+    const requestedCatalogId = String(id || "").trim();
+    const sourceCatalogId = fromDiscoveryCatalogId(requestedCatalogId);
+    const isDiscoveryOnlyCatalogRequest = isDiscoveryCatalogId(requestedCatalogId);
+
     // Convert Stremio type to TMDB type
     const tmdbType = type === "series" ? "tv" : "movie";
-    const allowFuture = id.includes("upcoming");
+    const allowFuture = sourceCatalogId.includes("upcoming");
     const config = getRequestConfig();
-    const resolvedExtra = extra || {};
-    const isHomeRequest = isHomeCatalogRequest(resolvedExtra);
+    const resolvedExtra = isDiscoveryOnlyCatalogRequest
+        ? { ...(extra || {}), discover: "only" }
+        : (extra || {});
+    const isHomeRequest = !isDiscoveryOnlyCatalogRequest && isHomeCatalogRequest(resolvedExtra);
     const homePageCap = isHomeRequest ? HOME_TMDB_PAGE_CAP : null;
     const catalogShapes = getConfiguredCatalogShapes(config);
-    const landscapeForCatalog = shouldLandscapeCatalog(id, catalogShapes);
+    const landscapeForCatalog = shouldLandscapeCatalog(sourceCatalogId, catalogShapes);
 
     try {
-        if (isKitsuCatalogId(id)) {
-            const metas = await fetchKitsuCatalogMetas(id, type, resolvedExtra, config);
+        if (isKitsuCatalogId(sourceCatalogId)) {
+            const metas = await fetchKitsuCatalogMetas(sourceCatalogId, type, resolvedExtra, config);
             return { metas: applyLandscapeToMetas(metas, landscapeForCatalog, config) };
         }
 
-        if (isTop10CatalogId(id)) {
-            const metas = await fetchTop10CatalogMetas(id, type, resolvedExtra, config);
+        if (isTop10CatalogId(sourceCatalogId)) {
+            const metas = await fetchTop10CatalogMetas(sourceCatalogId, type, resolvedExtra, config);
             return { metas: applyLandscapeToMetas(metas, landscapeForCatalog, config) };
         }
 
-        if (type === "series" && (id === LAST_VIDEOS_CATALOG_ID || id === CALENDAR_VIDEOS_CATALOG_ID)) {
-            const metasDetailed = await fetchSpecialSeriesCatalogMetas(id, resolvedExtra, config);
+        if (type === "series" && (sourceCatalogId === LAST_VIDEOS_CATALOG_ID || sourceCatalogId === CALENDAR_VIDEOS_CATALOG_ID)) {
+            const metasDetailed = await fetchSpecialSeriesCatalogMetas(sourceCatalogId, resolvedExtra, config);
             return { metasDetailed };
         }
 
@@ -5613,8 +5621,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
             const query = resolvedExtra.search;
             const searchResults = new Map(); // Use Map to deduplicate by ID
             const today = new Date().toISOString().split('T')[0];
-            const isAnimeSearch = id.includes("anime_search");
-            const preferKitsuId = usesKitsuAnimeIds(id);
+            const isAnimeSearch = sourceCatalogId.includes("anime_search");
+            const preferKitsuId = usesKitsuAnimeIds(sourceCatalogId);
 
             try {
                 // 1. Search Content (Movie/TV)
@@ -5674,7 +5682,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 const orderedMetas = isAnimeSearch
                     ? sortMetasByReleaseDesc(metas)
                     : metas;
-                console.log(`[Easy Catalogs] Search debug: query="${query}" type=${type} catalog=${id} results=${results.length} metas=${metas.length}`);
+                console.log(`[Easy Catalogs] Search debug: query="${query}" type=${type} catalog=${sourceCatalogId} results=${results.length} metas=${metas.length}`);
                 return { metas: applyLandscapeToMetas(orderedMetas, landscapeForCatalog, config) };
 
             } catch (e) {
@@ -5700,7 +5708,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
         let isCatalogOnly = false;
 
         // Check if ID matches a provider pattern
-        const parts = id.split('.');
+        const parts = sourceCatalogId.split('.');
         if (parts.length >= 3) {
             let potentialSlug = parts[2];
 
@@ -5732,7 +5740,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
         const shouldMergeProviderExclusives = !!(providerFromId && !isCatalogOnly && providerOriginalSourceId);
 
         // Handle Year Catalog
-        if (id === "tmdb.movie.year" || id === "tmdb.series.year") {
+        if (sourceCatalogId === "tmdb.movie.year" || sourceCatalogId === "tmdb.series.year") {
             if (tmdbType === "movie") {
                 endpoint = "discover/movie";
             } else {
@@ -5755,10 +5763,10 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                     queryParams += `&first_air_date_year=${currentYear}&sort_by=popularity.desc`;
                 }
             }
-        } else if (id === "tmdb.movie.now_playing") {
+        } else if (sourceCatalogId === "tmdb.movie.now_playing") {
             endpoint = "movie/now_playing";
             queryParams += "&region=IT";
-        } else if (id === "tmdb.movie.kids" || id === "tmdb.series.kids") {
+        } else if (sourceCatalogId === "tmdb.movie.kids" || sourceCatalogId === "tmdb.series.kids") {
             if (tmdbType === "movie") {
                 endpoint = "discover/movie";
                 // Animation (16) OR Family (10751)
@@ -5768,7 +5776,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 // Kids (10762) OR Animation (16) OR Family (10751)
                 queryParams += "&with_genres=10762|16|10751&sort_by=popularity.desc";
             }
-        } else if (id === "tmdb.movie.anime" || id === "tmdb.series.anime") {
+        } else if (sourceCatalogId === "tmdb.movie.anime" || sourceCatalogId === "tmdb.series.anime") {
             let genres = "16"; // Animation
 
             if (tmdbType === "movie") {
@@ -5788,7 +5796,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 // Animation (16) AND Language Japanese (ja)
                 queryParams += `&with_genres=${genres}&with_original_language=ja&sort_by=popularity.desc`;
             }
-        } else if (id === "tmdb.movie.trending" || id === "tmdb.series.trending") {
+        } else if (sourceCatalogId === "tmdb.movie.trending" || sourceCatalogId === "tmdb.series.trending") {
             const timeWindow = (extra && extra.genre && extra.genre.toLowerCase() === "day") ? "day" : "week";
             endpoint = `trending/${tmdbType}/${timeWindow}`;
         } else if (providerFromId) {
@@ -5884,24 +5892,24 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
             }
         } else {
             // No filters, default lists
-            if (id.includes("popular")) {
+            if (sourceCatalogId.includes("popular")) {
                 if (tmdbType === "movie") {
                     endpoint = "discover/movie";
                     queryParams += "&sort_by=popularity.desc";
                 } else {
                     endpoint = "tv/popular";
                 }
-            } else if (id.includes("trending")) {
+            } else if (sourceCatalogId.includes("trending")) {
                 const timeWindow = (extra && extra.genre && extra.genre.toLowerCase() === "day") ? "day" : "week";
                 endpoint = `trending/${tmdbType}/${timeWindow}`;
-            } else if (id.includes("top_rated")) {
+            } else if (sourceCatalogId.includes("top_rated")) {
                 if (tmdbType === "movie") {
                     endpoint = "discover/movie";
                     queryParams += "&sort_by=vote_average.desc&vote_count.gte=200";
                 } else {
                     endpoint = "tv/top_rated";
                 }
-            } else if (id.includes("upcoming")) {
+            } else if (sourceCatalogId.includes("upcoming")) {
                 if (tmdbType === "movie") {
                     endpoint = "movie/upcoming";
                     queryParams += "&region=IT";
@@ -5943,7 +5951,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
 
             while (metas.length < 20) {
                 const mergedResults = await fetchProviderOriginalMergedResults({
-                    id,
+                    id: sourceCatalogId,
                     tmdbType,
                     providerName: providerFromId,
                     extra: resolvedExtra,
@@ -5959,7 +5967,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
 
                 mergedAttempted = true;
                 const skipRegionCheck = false;
-                const preferKitsuId = usesKitsuAnimeIds(id);
+                const preferKitsuId = usesKitsuAnimeIds(sourceCatalogId);
                 const seriesAvailabilityRegion = tmdbType === "tv" ? mergedResults.region : null;
                 const mapped = await enrichAndMapItems(
                     mergedResults.items,
@@ -5992,7 +6000,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
         metas = await fetchCatalogMetasForQuery({
             endpoint,
             queryParams,
-            id,
+            id: sourceCatalogId,
             type,
             tmdbType,
             config,
@@ -6009,7 +6017,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 metas = await fetchCatalogMetasForQuery({
                     endpoint,
                     queryParams: replaceProviderQueryRegion(queryParams, fallbackRegion),
-                    id,
+                    id: sourceCatalogId,
                     type,
                     tmdbType,
                     config,
@@ -6189,7 +6197,7 @@ app.get('/manifest.json', (req, res) => {
                         customCatalogShapes
                     );
                     if (isDiscoverOnly) {
-                        filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
+                        filteredCatalogs.push(createDiscoveryOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
                     }
@@ -6203,7 +6211,7 @@ app.get('/manifest.json', (req, res) => {
                         customCatalogShapes
                     );
                     if (isDiscoverOnly) {
-                        filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
+                        filteredCatalogs.push(createDiscoveryOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
                     }
@@ -6232,7 +6240,7 @@ app.get('/manifest.json', (req, res) => {
                         customCatalogShapes
                     );
                     if (isDiscoverOnly) {
-                        filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
+                        filteredCatalogs.push(createDiscoveryOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
                     }
