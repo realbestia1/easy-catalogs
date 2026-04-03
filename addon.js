@@ -378,28 +378,23 @@ function applyConfiguredCatalogShape(catalog, lookupKey, shapes) {
     return { ...catalog, posterShape: "landscape" };
 }
 
-const DISCOVERY_ONLY_CATALOG_SUFFIX = ".discovery";
-
-function toDiscoveryCatalogId(catalogId) {
-    const normalizedCatalogId = String(catalogId || "").trim();
-    if (!normalizedCatalogId) return "";
-    if (normalizedCatalogId.endsWith(DISCOVERY_ONLY_CATALOG_SUFFIX)) return normalizedCatalogId;
-    return `${normalizedCatalogId}${DISCOVERY_ONLY_CATALOG_SUFFIX}`;
-}
-
-function fromDiscoveryCatalogId(catalogId) {
-    const normalizedCatalogId = String(catalogId || "").trim();
-    if (!normalizedCatalogId.endsWith(DISCOVERY_ONLY_CATALOG_SUFFIX)) return normalizedCatalogId;
-    return normalizedCatalogId.slice(0, -DISCOVERY_ONLY_CATALOG_SUFFIX.length);
-}
-
-function isDiscoveryCatalogId(catalogId) {
-    return String(catalogId || "").trim().endsWith(DISCOVERY_ONLY_CATALOG_SUFFIX);
-}
-
-function createDiscoveryOnlyCatalog(catalog) {
+function createDiscoverOnlyCatalog(catalog) {
     if (!catalog) return catalog;
-    return { ...catalog, id: toDiscoveryCatalogId(catalog.id) };
+
+    const extra = Array.isArray(catalog.extra) ? [...catalog.extra] : [];
+    const hasDiscoverExtra = extra.some(entry => entry && entry.name === "discover");
+    if (!hasDiscoverExtra) {
+        extra.push({ name: "discover", isRequired: true, options: ["Only"] });
+    }
+
+    const genreExtra = extra.find(entry => entry && entry.name === "genre" && Array.isArray(entry.options));
+    const genres = genreExtra ? [...genreExtra.options] : catalog.genres;
+
+    return {
+        ...catalog,
+        ...(Array.isArray(genres) ? { genres } : {}),
+        extra
+    };
 }
 
 function getTextBackdropFromDetails(details, preferredLangs = ["it", "en"]) {
@@ -5580,19 +5575,14 @@ async function transformToMeta(item, type, config = null, options = {}) {
 
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
     console.log(`[Easy Catalogs] Request: type=${type} id=${id} extra=${JSON.stringify(extra)}`);
-
-    const requestedCatalogId = String(id || "").trim();
-    const sourceCatalogId = fromDiscoveryCatalogId(requestedCatalogId);
-    const isDiscoveryOnlyCatalogRequest = isDiscoveryCatalogId(requestedCatalogId);
+    const sourceCatalogId = String(id || "").trim();
 
     // Convert Stremio type to TMDB type
     const tmdbType = type === "series" ? "tv" : "movie";
     const allowFuture = sourceCatalogId.includes("upcoming");
     const config = getRequestConfig();
-    const resolvedExtra = isDiscoveryOnlyCatalogRequest
-        ? { ...(extra || {}), discover: "only" }
-        : (extra || {});
-    const isHomeRequest = !isDiscoveryOnlyCatalogRequest && isHomeCatalogRequest(resolvedExtra);
+    const resolvedExtra = extra || {};
+    const isHomeRequest = isHomeCatalogRequest(resolvedExtra);
     const homePageCap = isHomeRequest ? HOME_TMDB_PAGE_CAP : null;
     const catalogShapes = getConfiguredCatalogShapes(config);
     const landscapeForCatalog = shouldLandscapeCatalog(sourceCatalogId, catalogShapes);
@@ -6197,7 +6187,7 @@ app.get('/manifest.json', (req, res) => {
                         customCatalogShapes
                     );
                     if (isDiscoverOnly) {
-                        filteredCatalogs.push(createDiscoveryOnlyCatalog(resolvedCatalog));
+                        filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
                     }
@@ -6211,7 +6201,7 @@ app.get('/manifest.json', (req, res) => {
                         customCatalogShapes
                     );
                     if (isDiscoverOnly) {
-                        filteredCatalogs.push(createDiscoveryOnlyCatalog(resolvedCatalog));
+                        filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
                     }
@@ -6240,7 +6230,7 @@ app.get('/manifest.json', (req, res) => {
                         customCatalogShapes
                     );
                     if (isDiscoverOnly) {
-                        filteredCatalogs.push(createDiscoveryOnlyCatalog(resolvedCatalog));
+                        filteredCatalogs.push(createDiscoverOnlyCatalog(resolvedCatalog));
                     } else {
                         filteredCatalogs.push(resolvedCatalog);
                     }
